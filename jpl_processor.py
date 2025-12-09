@@ -3,7 +3,7 @@
 JPEG Pleno Processor - Complete workflow (Steps 1-6)
 Steps 1-3: Encoding (Preprocessing + PPM to PGX + Encoding)
 Steps 4-6: Decoding (Decoding + PGX to PPM + Postprocessing)
-Usage: python jpl_processor.py <dataset_name> <grid_t> <grid_s> <width> <height> [--steps STEPS] [--lambda LAMBDA]
+Usage: python jpl_processor.py <dataset_name> <grid_t> <grid_s> [--steps STEPS] [--lambda LAMBDA]
 """
 
 import os
@@ -13,6 +13,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 import time
+from PIL import Image
 
 class JPEGPlenoProcessor:
     def __init__(self, jplm_build_path, base_datasets_path):
@@ -153,55 +154,57 @@ class JPEGPlenoProcessor:
         
         return True, total_time
 
-    def detect_actual_dimensions(self, pgx_path):
-        """Auto-rileva dimensioni reali dal primo file PGX"""
-        try:
-            pgx_files = list(pgx_path.glob("*.pgx"))
-            if pgx_files:
-                first_file = pgx_files[0]
-                with open(first_file, 'rb') as f:
-                    header = f.readline().decode('ascii')
-                    parts = header.strip().split()
-                    if len(parts) >= 5:
-                        width = int(parts[3])
-                        height = int(parts[4])
-                        return width, height
-        except Exception as e:
-            print(f"WARNING: Could not auto-detect dimensions: {e}")
-        return None, None
+    #def detect_actual_dimensions(self, pgx_path):
+    #    """Auto-rileva dimensioni reali dal primo file PGX"""
+    #    try:
+    #        pgx_files = list(pgx_path.glob("*.pgx"))
+    #        if pgx_files:
+    #            first_file = pgx_files[0]
+    #            with open(first_file, 'rb') as f:
+    #                header = f.readline().decode('ascii')
+    #                parts = header.strip().split()
+    #                if len(parts) >= 5:
+    #                    width = int(parts[3])
+    #                    height = int(parts[4])
+    #                    return width, height
+    #    except Exception as e:
+    #        print(f"WARNING: Could not auto-detect dimensions: {e}")
+    #    return None, None
 
     def calculate_optimal_block_size(self, width, height):
         """Calcola la dimensione ottimale del blocco per DCT"""
-        min_dimension = min(width, height)
-        
-        if min_dimension >= 1024:
-            optimal_size = 64
-        elif min_dimension >= 512:
-            optimal_size = 32
-        elif min_dimension >= 256:
-            optimal_size = 16
-        else:
-            optimal_size = 8
-        
-        optimal_size = self.nearest_power_of_two(optimal_size)
-        max_supported = 64
-        return min(optimal_size, max_supported)
+        return 32
+        #min_dimension = min(width, height)
+        #
+        #if min_dimension >= 1024:
+        #    optimal_size = 64
+        #elif min_dimension >= 512:
+        #    optimal_size = 32
+        #elif min_dimension >= 256:
+        #    optimal_size = 16
+        #else:
+        #    optimal_size = 8
+        #
+        #optimal_size = self.nearest_power_of_two(optimal_size)
+        #max_supported = 64
+        #return min(optimal_size, max_supported)
 
-    def nearest_power_of_two(self, n):
-        """Trova la potenza di 2 più vicina"""
-        powers = [4, 8, 16, 32, 64]
-        return min(powers, key=lambda x: abs(x - n))
+    #def nearest_power_of_two(self, n):
+    #    """Trova la potenza di 2 più vicina"""
+    #    powers = [4, 8, 16, 32, 64]
+    #    return min(powers, key=lambda x: abs(x - n))
 
     def calculate_auto_lambda(self, width, height, grid_t, grid_s):
         """Calcola lambda automaticamente in base alla dimensione totale del light field"""
-        total_pixels = width * height * grid_t * grid_s
-        
-        if total_pixels > 100000000:
-            return 5000
-        elif total_pixels > 50000000:
-            return 10000
-        else:
-            return 20000
+        return 500
+        #total_pixels = width * height * grid_t * grid_s
+        #
+        #if total_pixels > 100000000:
+        #    return 5000
+        #elif total_pixels > 50000000:
+        #    return 10000
+        #else:
+        #    return 20000
 
     def step3_jpl_encoding(self, dataset_name, grid_t, grid_s, width, height, lambda_value=None):
         """STEP 3: JPEG Pleno Encoding con parametri dinamici"""
@@ -212,10 +215,10 @@ class JPEGPlenoProcessor:
         dataset_base_path = self.base_datasets_path / dataset_name
         raw_shifted_pgx_path = dataset_base_path / "RAW" / "PGX"
         
-        actual_width, actual_height = self.detect_actual_dimensions(raw_shifted_pgx_path)
-        if actual_width and actual_height:
-            width, height = actual_width, actual_height
-            print(f"Auto-detected dimensions: {width}x{height}")
+        #actual_width, actual_height = self.detect_actual_dimensions(raw_shifted_pgx_path)
+        #if actual_width and actual_height:
+        #    width, height = actual_width, actual_height
+        #    print(f"Auto-detected dimensions: {width}x{height}")
         
         output_jpl_path = dataset_base_path / "encoded"
         output_jpl_file = output_jpl_path / f"{dataset_name}.jpl"
@@ -523,6 +526,27 @@ class JPEGPlenoProcessor:
         
         return True, step_times
 
+def get_ppm_dimensions(folder_path):
+    """
+    Trova il primo file .ppm in una cartella e restituisce (larghezza, altezza).
+    Richiede la libreria Pillow.
+    """
+    # 1. Cerca i file .ppm
+    files = list(folder_path.glob("*.ppm"))
+    
+    if not files:
+        print("Nessun file .ppm trovato nella cartella.")
+        return None
+    
+    # 2. Apre l'immagine e legge le dimensioni
+    try:
+        with Image.open(files[0]) as img:
+            width, height = img.size
+            return width, height
+    except Exception as e:
+        print(f"Errore nella lettura del file {files[0]}: {e}")
+        return None
+
 def main():
     parser = argparse.ArgumentParser(
         description="JPEG Pleno Processor - Complete workflow (Steps 1-6) with dynamic parameters",
@@ -530,34 +554,34 @@ def main():
         epilog="""
 Examples:
   # Complete workflow with auto parameters
-  python jpl_processor.py bikes 13 13 625 434
+  python jpl_processor.py bikes 13 13
 
-  # Custom lambda value (higher = better quality, lower = more compression)
-  python jpl_processor.py bikes 13 13 625 434 --lambda 5000
+  # Custom lambda value (higher = more compression, lower = higher quality)
+  python jpl_processor.py bikes 13 13 --lambda 1000
 
   # Only encoding steps with custom lambda
-  python jpl_processor.py bikes 13 13 625 434 --steps 1,2,3 --lambda 20000
+  python jpl_processor.py bikes 13 13 --steps 1,2,3 --lambda 20000
 
 Lambda values guide:
-  - 1000-5000:    High compression, medium quality
-  - 5000-20000:   Medium compression, high quality (default auto)
-  - 20000-50000:  Low compression, excellent quality
-  - auto:         Automatically calculated based on dataset size
+  - 1000-5000:    Low compression, excellent quality
+  - 5000-20000:   Medium compression, medium quality (default auto)
+  - 20000-50000:  High compression, low quality
+  - auto:         Default value 500
         """
     )
     
     parser.add_argument("dataset_name", help="Name of the dataset folder (e.g., bikes, cars)")
     parser.add_argument("grid_t", type=int, help="Number of horizontal views (t)")
     parser.add_argument("grid_s", type=int, help="Number of vertical views (s)") 
-    parser.add_argument("width", type=int, help="Image width in pixels")
-    parser.add_argument("height", type=int, help="Image height in pixels")
+    #parser.add_argument("width", type=int, help="Image width in pixels")
+    #parser.add_argument("height", type=int, help="Image height in pixels")
     parser.add_argument("--steps", help="Comma-separated steps to execute (1-6), e.g., '1,2,3' or '4,5,6'")
     parser.add_argument("--lambda", type=float, dest="lambda_value", help="Lambda parameter for quality/compression trade-off")
     
     args = parser.parse_args()
     
     # Configurazione paths
-    JPLM_BUILD_PATH = "/home/maimba/uni/jpeg-pleno-refsw/build"
+    JPLM_BUILD_PATH = "/home/losor2002/jpeg-pleno-refsw/build"
     BASE_DATASETS_PATH = "./datasets"
     
     # Parse steps
@@ -573,6 +597,13 @@ Lambda values guide:
     else:
         steps = [1, 2, 3, 4, 5, 6]
     
+    width, height = get_ppm_dimensions(Path(BASE_DATASETS_PATH) / args.dataset_name / "RAW" / "PPM")
+    if width is None or height is None:
+        print("ERROR: Could not determine image dimensions from PPM files.")
+        sys.exit(1)
+    else:
+        print(f"Detected image dimensions: {width}x{height}")
+    
     try:
         processor = JPEGPlenoProcessor(JPLM_BUILD_PATH, BASE_DATASETS_PATH)
         
@@ -580,8 +611,8 @@ Lambda values guide:
             args.dataset_name,
             args.grid_t,
             args.grid_s, 
-            args.width,
-            args.height,
+            width,
+            height,
             steps=steps,
             lambda_value=args.lambda_value
         )
