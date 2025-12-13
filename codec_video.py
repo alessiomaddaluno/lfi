@@ -4,16 +4,12 @@ Video Codec Comparison for Light Field Compression WITH PADDING AND TIMING
 Compares HEVC, AV1, and VP9 with proper padding and timing metrics
 """
 
-import os
 import subprocess
 import sys
 from pathlib import Path
-import av
 from PIL import Image
 import shutil
-import tempfile
 import time
-from datetime import timedelta
 
 def run_ffmpeg_command(cmd, description=""):
     """Esegue un comando FFmpeg e restituisce tempo di esecuzione"""
@@ -22,7 +18,7 @@ def run_ffmpeg_command(cmd, description=""):
     
     start_time = time.time()
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
         end_time = time.time()
         execution_time = end_time - start_time
         print(f"Success - Time: {execution_time:.2f}s")
@@ -62,106 +58,18 @@ def get_ppm_dimensions(ppm_folder):
                     continue
 
 def get_hevc_compatible_dimensions(width, height):
-    """Trova dimensioni compatibili con HEVC (multiple di 8)"""
-    new_width = ((width + 7) // 8) * 8  # Arrotonda per eccesso al multiplo di 8
+    """Calcola dimensioni multiple di 8 (necessarie per HEVC)"""
+    new_width = ((width + 7) // 8) * 8
     new_height = ((height + 7) // 8) * 8
-    
-    if new_width == width and new_height == height:
-        print(f"Dimensioni {width}x{height} già compatibili con HEVC")
-        return width, height
-    
-    print(f"Padding necessario: da {width}x{height} a {new_width}x{new_height}")
     return new_width, new_height
 
-def add_padding_to_ppm(ppm_folder, output_dir, target_width, target_height):
-    """Aggiunge padding nero ai PPM per raggiungere dimensioni compatibili"""
-    padded_dir = output_dir / "padded"
-    padded_dir.mkdir(exist_ok=True)
-    
-    print(f"Aggiungo padding alle immagini...")
-    start_time = time.time()
-    
-    padded_files = []
-    
-    for ppm_file in sorted(ppm_folder.glob("*.ppm")):
-        # Leggi immagine originale
-        with Image.open(ppm_file) as img:
-            original_width, original_height = img.size
-            
-            # Calcola padding (centrato)
-            pad_width = target_width - original_width
-            pad_height = target_height - original_height
-            
-            left = pad_width // 2
-            top = pad_height // 2
-            
-            # Crea nuova immagine con padding nero
-            if img.mode == 'RGB':
-                padded_img = Image.new('RGB', (target_width, target_height), (0, 0, 0))
-                padded_img.paste(img, (left, top))
-            else:
-                # Converti a RGB se necessario
-                rgb_img = img.convert('RGB')
-                padded_img = Image.new('RGB', (target_width, target_height), (0, 0, 0))
-                padded_img.paste(rgb_img, (left, top))
-            
-            # Salva
-            output_path = padded_dir / ppm_file.name
-            padded_img.save(output_path, format='PPM')
-            padded_files.append(output_path)
-    
-    end_time = time.time()
-    padding_time = end_time - start_time
-    print(f"Padding completato: {len(padded_files)} immagini - Time: {padding_time:.2f}s")
-    return padded_dir, padding_time
-
-def remove_padding_from_images(padded_folder, output_dir, original_width, original_height, target_width, target_height):
-    """Rimuove il padding dalle immagini decompresse"""
-    unpadded_dir = output_dir / "unpadded"
-    unpadded_dir.mkdir(exist_ok=True)
-    
-    print(f"Rimuovo padding dalle immagini...")
-    start_time = time.time()
-    
-    # Calcola coordinate per crop
-    pad_width = target_width - original_width
-    pad_height = target_height - original_height
-    
-    left = pad_width // 2
-    top = pad_height // 2
-    right = left + original_width
-    bottom = top + original_height
-    
-    for ppm_file in sorted(padded_folder.glob("*.ppm")):
-        with Image.open(ppm_file) as img:
-            # Crop per rimuovere padding
-            cropped_img = img.crop((left, top, right, bottom))
-            
-            # Salva
-            output_path = unpadded_dir / ppm_file.name
-            cropped_img.save(output_path, format='PPM')
-    
-    # Sposta i file unpadded nella directory finale
-    final_dir = output_dir / "final"
-    final_dir.mkdir(exist_ok=True)
-    
-    for unpadded_file in unpadded_dir.glob("*.ppm"):
-        final_file = final_dir / unpadded_file.name
-        unpadded_file.rename(final_file)
-    
-    # Pulizia
-    shutil.rmtree(unpadded_dir)
-    
-    end_time = time.time()
-    unpadding_time = end_time - start_time
-    
-    print(f"Padding rimosso: {len(list(final_dir.glob('*.ppm')))} immagini - Time: {unpadding_time:.2f}s")
-    return final_dir, unpadding_time
-
 def compress_with_codec(ppm_folder, output_dir, codec, crf=3):
-    """Compress le viste PPM con codec specifico e padding per HEVC"""
+    """
+    Comprime le viste PPM usando FFmpeg.
+    Applica il padding ON-THE-FLY usando il filtro 'pad' di FFmpeg se necessario (HEVC).
+    """
     
-    # Ottieni dimensioni originali
+    # 1. Ottieni dimensioni originali leggendo solo il primo file
     original_dimensions = get_ppm_dimensions(ppm_folder)
     if not original_dimensions:
         print("Impossibile leggere dimensioni PPM")
@@ -196,31 +104,43 @@ def compress_with_codec(ppm_folder, output_dir, codec, crf=3):
     info = codec_info[codec]
     output_file = output_dir / f"compressed_{codec}.{info['extension']}"
     
-    # Gestione padding per HEVC
-    temp_padded_dir = None
-    padding_time = 0
-    unpadding_time = 0
+    # 2. Calcolo del Padding (senza creare file fisici)
+    padding_info = None
+    filters = []
     
     if info['requires_padding']:
         target_width, target_height = get_hevc_compatible_dimensions(original_width, original_height)
-        padded_dir, padding_time = add_padding_to_ppm(ppm_folder, output_dir, target_width, target_height)
-        input_path = str(padded_dir / "*.ppm")
-        padding_info = (original_width, original_height, target_width, target_height)
-        temp_padded_dir = padded_dir
-    else:
-        input_path = str(ppm_folder / "*.ppm")
-        padding_info = None
+        
+        if target_width != original_width or target_height != original_height:
+            print(f"Applying FFmpeg padding: {original_width}x{original_height} -> {target_width}x{target_height}")
+            # Padding filter: w:h:x:y:color
+            # x=0, y=0 allinea l'immagine in alto a sinistra (Top-Left)
+            filters.append(f"pad={target_width}:{target_height}:0:0:black")
+            
+            # Salviamo le info per la decompressione (per fare il crop opposto)
+            padding_info = (original_width, original_height, target_width, target_height)
+    
+    # 3. Costruzione comando FFmpeg
+    input_path = str(ppm_folder / "*.ppm")
     
     cmd = [
         "ffmpeg", "-y",
         "-framerate", "120",
         "-pattern_type", "glob",
-        "-i", input_path,
-        "-c:v", info['codec'],
-        "-crf", str(crf),
-        "-pix_fmt", "yuv420p",
+        "-i", input_path
     ]
     
+    # Aggiungi filtri video se necessari (padding)
+    if filters:
+        cmd.extend(["-vf", ",".join(filters)])
+    
+    cmd.extend([
+        "-c:v", info['codec'],
+        "-crf", str(crf),
+        "-pix_fmt", "yuv420p10le"
+    ])
+    
+    # Parametri specifici per codec
     if codec == 'av1':
         cmd.extend(["-cpu-used", "4"])
     elif codec == 'vp9':
@@ -228,113 +148,96 @@ def compress_with_codec(ppm_folder, output_dir, codec, crf=3):
     
     cmd.append(str(output_file))
     
-    success, compression_time = run_ffmpeg_command(cmd, f"Compression {info['name']}")
-    
-    # Pulizia directory temporanea padding
-    if temp_padded_dir and temp_padded_dir.exists():
-        shutil.rmtree(temp_padded_dir)
+    # 4. Esecuzione
+    success, compression_time = run_ffmpeg_command(cmd, f"Compression {info['name']} (with internal padding)")
     
     if success and output_file.exists():
-        total_time = padding_time + compression_time
-        return output_file, padding_info, total_time
+        # Nota: ora compression_time include anche il tempo di padding on-the-fly, 
+        # che è molto più veloce di farlo con Python prima.
+        return output_file, padding_info, compression_time
+        
     return None, None, compression_time
 
-def decompress_video_pyav(video_file, output_dir, codec, original_ppm_folder, padding_info=None):
-    """Decompressione video usando PyAV con gestione padding"""
+def decompress_video_ffmpeg(video_file, output_dir, codec, original_ppm_folder, padding_info=None):
+    """
+    Decompressione con FIX per larghezza dispari.
+    Ordine filtri cruciale:
+    1. Bit-shift/Conversione RGB (lutrgb) -> I pixel diventano indipendenti.
+    2. Crop -> Ora è possibile tagliare su numeri dispari (es. 625).
+    """
     
     decompressed_dir = output_dir / f"decompressed_{codec}"
     decompressed_dir.mkdir(exist_ok=True)
     
-    print(f"Decompressing {codec.upper()} with PyAV")
+    temp_dir = output_dir / f"temp_ffmpeg_{codec}"
+    temp_dir.mkdir(exist_ok=True)
+    
+    print(f"Decompressing {codec.upper()} (Fix Odd Width)...")
     start_time = time.time()
     
     try:
-        container = av.open(str(video_file), mode="r") 
-        stream = container.streams.video[0]
-        count = 0
+        cmd = ["ffmpeg", "-y", "-i", str(video_file)]
         
-        original_files = sorted(original_ppm_folder.glob("*.ppm"))
+        filters = []
         
-        # Directory temporanea per frame con padding
-        temp_frame_dir = output_dir / f"temp_frames_{codec}"
-        temp_frame_dir.mkdir(exist_ok=True)
+        # --- CAMBIAMENTO CRUCIALE QUI ---
         
-        for frame in container.decode(stream):
-            if count < len(original_files):
-                orig_name = original_files[count].name
-                
-                # Salva frame temporaneamente (potrebbe avere padding)
-                temp_output = temp_frame_dir / f"frame_{count:06d}.ppm"
-                img = frame.to_image()
-                
-                # Converti a RGB se necessario
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                
-                img.save(str(temp_output))
-                count += 1
-            else:
-                break
+        # 1. PRIMA applichiamo la correzione colore (lutrgb).
+        # Questo costringe FFmpeg a convertire da YUV420p10 a RGB48 PRIMA del crop.
+        # Una volta in RGB, non abbiamo più il vincolo dei blocchi 2x2.
+        filters.append("lutrgb=r=val/64:g=val/64:b=val/64")
         
-        container.close()
-        
-        decompression_time = time.time() - start_time
-        unpadding_time = 0
-        
-        # Gestione padding se necessario
+        # 2. POI applichiamo il CROP.
+        # Essendo ora in RGB, possiamo croppare a 625 (dispari) senza che FFmpeg arrotondi a 624.
         if padding_info:
             original_width, original_height, target_width, target_height = padding_info
-            final_dir, unpadding_time = remove_padding_from_images(
-                temp_frame_dir, output_dir, 
-                original_width, original_height, target_width, target_height
-            )
+            # Crop fisso a 0:0 (Top-Left)
+            filters.append(f"crop={original_width}:{original_height}:0:0")
+        
+        # --------------------------------
+        
+        if filters:
+            cmd.extend(["-vf", ",".join(filters)])
             
-            # Rinomina i file con i nomi originali
-            for i, ppm_file in enumerate(sorted(final_dir.glob("*.ppm"))):
-                if i < len(original_files):
-                    orig_name = original_files[i].name
-                    final_path = decompressed_dir / orig_name
-                    ppm_file.rename(final_path)
-                    
-                    if i < 5:
-                        print(f"  Saved: {orig_name}")
-        else:
-            # Senza padding, rinomina direttamente
-            for i, temp_file in enumerate(sorted(temp_frame_dir.glob("*.ppm"))):
-                if i < len(original_files):
-                    orig_name = original_files[i].name
-                    final_path = decompressed_dir / orig_name
-                    temp_file.rename(final_path)
-                    
-                    if i < 5:
-                        print(f"  Saved: {orig_name}")
+        cmd.extend(["-pix_fmt", "rgb48be"])
         
-        # Pulizia directory temporanee
-        if temp_frame_dir.exists():
-            shutil.rmtree(temp_frame_dir)
+        temp_pattern = temp_dir / "frame_%06d.ppm"
+        cmd.append(str(temp_pattern))
         
-        final_files = list(decompressed_dir.glob("*.ppm"))
-        total_decompression_time = decompression_time + unpadding_time
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         
-        print(f"Decompressed frames: {len(final_files)}")
-        print(f"Decompression time: {decompression_time:.2f}s + unpadding: {unpadding_time:.2f}s = {total_decompression_time:.2f}s")
-        
-        # Verifica dimensioni
-        if final_files:
-            with Image.open(final_files[0]) as img:
-                final_width, final_height = img.size
-                print(f"Final dimensions: {final_width}x{final_height}")
-        
-        return decompressed_dir if final_files else None, total_decompression_time
-        
-    except Exception as e:
         decompression_time = time.time() - start_time
-        print(f"PyAV decompression error after {decompression_time:.2f}s: {e}")
-        # Pulizia in caso di errore
-        for temp_dir in [output_dir / "padded", output_dir / "unpadded", output_dir / "final", output_dir / f"temp_frames_{codec}"]:
-            if temp_dir.exists():
-                shutil.rmtree(temp_dir)
-        return None, decompression_time
+        
+        # --- RINOMINA E PATCH HEADER ---
+        original_files = sorted(original_ppm_folder.glob("*.ppm"))
+        temp_files = sorted(temp_dir.glob("frame_*.ppm"))
+        
+        limit = min(len(original_files), len(temp_files))
+        
+        for i in range(limit):
+            src = temp_files[i]
+            dst = decompressed_dir / original_files[i].name
+            src.rename(dst)
+            
+            # Patch header 65535 -> 1023
+            try:
+                with open(dst, 'r+b') as f:
+                    header_chunk = f.read(100)
+                    val_pos = header_chunk.find(b'65535')
+                    if val_pos != -1:
+                        f.seek(val_pos)
+                        f.write(b' 1023')
+            except Exception:
+                pass
+
+        shutil.rmtree(temp_dir)
+        
+        return decompressed_dir, decompression_time
+
+    except subprocess.CalledProcessError as e:
+        print(f"FFmpeg error: {e}")
+        if temp_dir.exists(): shutil.rmtree(temp_dir)
+        return None, time.time() - start_time
 
 def calculate_metrics(original_ppm_dir, decompressed_dir, codec, compressed_dir):
     """Calcola metriche di compressione"""
@@ -452,7 +355,7 @@ def main():
             print(f"Compression failed")
             compression_times[codec] = 0
     
-    # Phase 2: Decompression with PyAV
+    # Phase 2: Decompression
     print("\nPHASE 2: DECOMPRESSION")
     print("=" * 60)
     
@@ -463,7 +366,7 @@ def main():
             continue
             
         print(f"\n--- {codec.upper()} ---")
-        decompressed_folder, decompression_time = decompress_video_pyav(
+        decompressed_folder, decompression_time = decompress_video_ffmpeg(
             results[codec]['compressed_file'],
             decompressed_dir,
             codec,
