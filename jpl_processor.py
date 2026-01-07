@@ -585,7 +585,7 @@ Lambda values guide:
     parser.add_argument("dataset_name", help="Name of the dataset folder (e.g., bikes, cars)")
     #parser.add_argument("grid_t", type=int, help="Number of horizontal views (t)")
     #parser.add_argument("grid_s", type=int, help="Number of vertical views (s)") 
-    parser.add_argument("--lenslet", action=argparse.BooleanOptionalAction, help="Whether the dataset is of the lenslet type", required=True)
+    parser.add_argument("--lenslet", action=argparse.BooleanOptionalAction, help="Whether the dataset is of the lenslet type. If it isn't, steps 1 and 6 are skipped.", required=True)
     #parser.add_argument("width", type=int, help="Image width in pixels")
     #parser.add_argument("height", type=int, help="Image height in pixels")
     parser.add_argument("--steps", help="Comma-separated steps to execute (1-6), e.g., '1,2,3' or '4,5,6'")
@@ -619,7 +619,16 @@ Lambda values guide:
             sys.exit(1)
     else:
         steps = [1, 2, 3, 4, 5, 6]
-        
+    
+    if 1 in steps and not args.lenslet:
+        steps.remove(1)
+    if 6 in steps and not args.lenslet:
+        steps.remove(6)
+    
+    if steps == []:
+        print("There are no steps to execute. Exiting.")
+        sys.exit(0)
+    
     # Auto-detect grid dimensions
     grid_t, grid_s = get_grid_dimensions(Path(BASE_DATASETS_PATH) / args.dataset_name / "RAW" / "PPM")
     if grid_t <= 0 or grid_s <= 0:

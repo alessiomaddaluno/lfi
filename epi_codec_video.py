@@ -9,6 +9,7 @@ import argparse
 import subprocess
 import time
 import shutil
+import gc
 from pathlib import Path
 
 # --- CONFIGURAZIONE ---
@@ -144,9 +145,15 @@ def compress_epi_video(volume, output_path, codec, crf=None):
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, bufsize=10**8)
     
     try:
-        proc.stdin.write(volume.tobytes())
+        # Iteriamo sul primo asse (Frames) per inviare pezzi più piccoli
+        for i in range(volume.shape[0]):
+            proc.stdin.write(volume[i].tobytes())
         proc.stdin.close()
         proc.wait()
+    except BrokenPipeError:
+        print("Errore: Pipe interrotta (FFmpeg potrebbe essere crashato)")
+        proc.kill()
+        return False, 0, 0, 0
     except Exception as e:
         print(f"Errore pipe python: {e}")
         if proc.poll() is None: proc.kill()
@@ -238,6 +245,8 @@ def run_comparison(input_folder, grid_u, grid_v, codec_crf):
     U, V, H, W, C = lf_data.shape
     
     epi_vol, pad_frames, t_transform = transform_to_epi_volume(lf_data)
+    del lf_data
+    gc.collect()
     epi_shape = epi_vol.shape 
     
     codecs = ['hevc', 'av1', 'vp9']
