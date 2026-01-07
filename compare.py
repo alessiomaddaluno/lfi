@@ -248,50 +248,73 @@ if __name__ == "__main__":
     
     parser.add_argument("dataset_name", help="Name of the dataset folder (e.g., bikes, cars)")
     parser.add_argument("--lenslet", action=argparse.BooleanOptionalAction, help="Whether the dataset is of the lenslet type", required=True)
-    parser.add_argument("-c", "--codec", help="Codec used for compression (jpl, av1, hevc, vp9, epi_hevc, epi_av1, epi_vp9)", required=True,
-                        choices=["jpl", "av1", "hevc", "vp9", "epi_hevc", "epi_av1", "epi_vp9"])
+    parser.add_argument("-c", "--codecs", help="Codecs to test (jpl, hevc, av1, vp9, epi_hevc, epi_av1, epi_vp9), input as a comma-separated list without spaces. If not provided, all codecs will be tested.")
     
     args = parser.parse_args()
     
+    # Parse codecs
+    DEFAULT_CODECS = ["jpl", "hevc", "av1", "vp9", "epi_hevc", "epi_av1", "epi_vp9"]
+    
+    if args.codecs:
+        try:
+            codecs = [codec.strip() for codec in args.codecs.split(',')]
+            for codec in codecs:
+                if codec not in DEFAULT_CODECS:
+                    raise ValueError(f"Codec {codec} is not valid")
+        except ValueError as e:
+            print(f"ERROR: Invalid codecs format: {e}")
+            sys.exit(1)
+    else:
+        codecs = DEFAULT_CODECS
+        
+    print(f"Codecs to test: {codecs}")
+    
+    # Set base dataset path
     BASE_DATASETS_PATH = "./datasets"
     dataset_base_path = Path(BASE_DATASETS_PATH) / args.dataset_name
 
-    # Original folder
-    original_folder = dataset_base_path / "RAW" / ("PPM" if not args.lenslet else "PPM_shifted")
-    if not os.path.exists(original_folder):
-        print(f"ERRORE: Cartella originale non trovata: {original_folder}")
-        sys.exit(1)
-    else:
-        print(f"Original: {original_folder}")
-    
-    # Decompressed folder
-    if args.codec == "jpl":
-        decompressed_folder = dataset_base_path / "decoded" / "PPM" / (args.dataset_name if not args.lenslet else f"{args.dataset_name}_shifted")
-    elif args.codec in ["av1", "hevc", "vp9"]:
-        decompressed_folder = dataset_base_path / "RAW" / "codec_comparison_timing" / "decompressed" / f"decompressed_{args.codec}"
-    else:  # epi_hevc, epi_av1, epi_vp9
-        decompressed_folder = dataset_base_path / "RAW" / "epi_comparison" / "decompressed" / args.codec.split('_')[1]
+    # Test each codec
+    for codec in codecs:
+        print("\n" + "#" * 80)
+        print(f"ANALISI PER CODEC: {codec.upper()}")
+        print("#" * 80)
+        
+        # Original folder
+        original_folder = dataset_base_path / "RAW" / ("PPM" if not args.lenslet else "PPM_shifted")
+        
+        if not os.path.exists(original_folder):
+            print(f"ERRORE: Cartella originale non trovata: {original_folder}")
+            sys.exit(1)
+        else:
+            print(f"Original: {original_folder}")
 
-    if not os.path.exists(decompressed_folder):
-        print(f"ERRORE: Cartella decompressa non trovata: {decompressed_folder}")
-        sys.exit(1)
-    else:
-        print(f"Decompressed: {decompressed_folder}")
-    
-    # Compressed file path
-    if args.codec == "jpl":
-        compressed_file = dataset_base_path / "encoded" / f"{args.dataset_name}.jpl"
-    elif args.codec in ["av1", "hevc", "vp9"]:
-        codec = args.codec
-        compressed_file = dataset_base_path / "RAW" / "codec_comparison_timing" / "compressed" / f"compressed_{codec}.{'mkv' if codec == 'av1' else 'mp4' if codec == 'hevc' else 'webm'}"
-    else:  # epi_hevc, epi_av1, epi_vp9
-        codec = args.codec.split('_')[1]
-        compressed_file = dataset_base_path / "RAW" / "epi_comparison" / "compressed" / f"epi_{codec}.{'mkv' if codec == 'av1' else 'mp4' if codec == 'hevc' else 'webm'}"
+        # Decompressed folder
+        if codec == "jpl":
+            decompressed_folder = dataset_base_path / "decoded" / "PPM" / (args.dataset_name if not args.lenslet else f"{args.dataset_name}_shifted")
+        elif codec in ["av1", "hevc", "vp9"]:
+            decompressed_folder = dataset_base_path / "decoded" / "codec_video" / codec
+        else:  # epi_hevc, epi_av1, epi_vp9
+            decompressed_folder = dataset_base_path / "decoded" / "epi_codec_video" / codec.split('_')[1]
 
-    if not os.path.exists(compressed_file):
-        print(f"ERRORE: File compresso non trovato: {compressed_file}")
-        sys.exit(1)
-    else:
-        print(f"Compressed file: {compressed_file}")
+        if not os.path.exists(decompressed_folder):
+            print(f"ERRORE: Cartella decompressa non trovata: {decompressed_folder}")
+            continue
+        else:
+            print(f"Decompressed: {decompressed_folder}")
 
-    comparison(original_folder, decompressed_folder, compressed_file)
+        # Compressed file path
+        if codec == "jpl":
+            compressed_file = dataset_base_path / "encoded" / f"{args.dataset_name}.jpl"
+        elif codec in ["av1", "hevc", "vp9"]:
+            compressed_file = dataset_base_path / "encoded" / "codec_video" / f"{codec}.{'mkv' if codec == 'av1' else 'mp4' if codec == 'hevc' else 'webm'}"
+        else:  # epi_hevc, epi_av1, epi_vp9
+            epi_codec = codec.split('_')[1]
+            compressed_file = dataset_base_path / "encoded" / "epi_codec_video" / f"epi_{epi_codec}.{'mkv' if epi_codec == 'av1' else 'mp4' if epi_codec == 'hevc' else 'webm'}"
+
+        if not os.path.exists(compressed_file):
+            print(f"ERRORE: File compresso non trovato: {compressed_file}")
+            continue
+        else:
+            print(f"Compressed file: {compressed_file}")
+
+        comparison(original_folder, decompressed_folder, compressed_file)

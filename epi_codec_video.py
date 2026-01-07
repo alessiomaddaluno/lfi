@@ -218,14 +218,15 @@ def decompress_epi_video(video_path, shape_meta, pad_w, pad_h):
     return volume, time.time() - start_t
 
 def run_comparison(input_folder, grid_u, grid_v, codec_crf):
-    output_base = Path(input_folder).parent / "epi_comparison"
-    if output_base.exists(): shutil.rmtree(output_base)
-    output_base.mkdir(parents=True)
+    output_base = Path(input_folder).parent.parent
     
-    comp_dir = output_base / "compressed"
-    comp_dir.mkdir()
-    decomp_dir = output_base / "decompressed"
-    decomp_dir.mkdir()
+    comp_dir = output_base / "encoded" / "epi_codec_video"
+    if comp_dir.exists(): shutil.rmtree(comp_dir)
+    comp_dir.mkdir(parents=True)
+    
+    decomp_dir = output_base / "decoded" / "epi_codec_video"
+    if decomp_dir.exists(): shutil.rmtree(decomp_dir)
+    decomp_dir.mkdir(parents=True)
     
     try:
         lf_data, names = load_16bit_dataset(input_folder, grid_u, grid_v)

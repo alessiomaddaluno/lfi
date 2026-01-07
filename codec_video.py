@@ -111,7 +111,7 @@ def compress_with_codec(ppm_folder, output_dir, codec, crf=None):
     if crf is not None:
         info['crf'] = crf
     
-    output_file = output_dir / f"compressed_{codec}.{info['extension']}"
+    output_file = output_dir / f"{codec}.{info['extension']}"
     
     # 2. Calcolo del Padding (senza creare file fisici)
     padding_info = None
@@ -175,7 +175,7 @@ def decompress_video_ffmpeg(video_file, output_dir, codec, original_ppm_folder, 
     2. Crop -> Ora è possibile tagliare su numeri dispari (es. 625).
     """
     
-    decompressed_dir = output_dir / f"decompressed_{codec}"
+    decompressed_dir = output_dir / f"{codec}"
     decompressed_dir.mkdir(exist_ok=True)
     
     temp_dir = output_dir / f"temp_ffmpeg_{codec}"
@@ -262,7 +262,7 @@ def calculate_metrics(original_ppm_dir, decompressed_dir, codec, compressed_dir)
         print(f"Numero di file diverso: original={len(original_files)}, decompressed={len(decompressed_files)}")
     
     original_size = sum(f.stat().st_size for f in original_files)
-    compressed_files = list(compressed_dir.glob(f"compressed_{codec}.*"))
+    compressed_files = list(compressed_dir.glob(f"{codec}.*"))
     
     if not compressed_files:
         return None
@@ -337,22 +337,24 @@ def main():
     if original_dimensions:
         print(f"Dimensioni originali: {original_dimensions[0]}x{original_dimensions[1]}")
     
-    # Delete old output folders if they exist
-    base_output = ppm_folder.parent / "codec_comparison_timing"
-    if base_output.exists():
-        shutil.rmtree(base_output)
-    
     # Create directory structure
-    compressed_dir = base_output / "compressed"
-    decompressed_dir = base_output / "decompressed"
+    base_output = ppm_folder.parent.parent
     
-    for dir_path in [base_output, compressed_dir, decompressed_dir]:
-        dir_path.mkdir(exist_ok=True)
+    compressed_dir = base_output / "encoded" / "codec_video"
+    if compressed_dir.exists():
+        shutil.rmtree(compressed_dir)
+    compressed_dir.mkdir(parents=True)
+    
+    decompressed_dir = base_output / "decoded" / "codec_video"
+    if decompressed_dir.exists():
+        shutil.rmtree(decompressed_dir)
+    decompressed_dir.mkdir(parents=True)
     
     print("CODEC COMPARISON WITH TIMING METRICS")
     print("=" * 60)
     print(f"Input: {ppm_folder}")
-    print(f"Output: {base_output}")
+    print(f"Compressed Output: {compressed_dir}")
+    print(f"Decompressed Output: {decompressed_dir}")
     
     # Codecs to test
     codecs = ['hevc', 'av1', 'vp9']
