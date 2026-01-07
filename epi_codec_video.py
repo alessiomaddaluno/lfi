@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from math import sqrt
+import sys
 import numpy as np
 import cv2
 import os
@@ -60,6 +62,8 @@ def load_16bit_dataset(folder_path, grid_u, grid_v):
     return lf_data, names
 
 def transform_to_epi_volume(lf_data):
+    start_t = time.time()
+    
     U, V, H, W, C = lf_data.shape
     print("Trasformazione in EPI Tiled...")
     
@@ -77,9 +81,11 @@ def transform_to_epi_volume(lf_data):
     tiled_volume = epi_raw.reshape(new_frame_count, final_height, W, C)
     
     print(f"Volume EPI: {new_frame_count} frames, {W}x{final_height}")
-    return tiled_volume, pad_frames
+    return tiled_volume, pad_frames, time.time() - start_t
 
 def reconstruct_from_epi(tiled_volume, pad_frames, grid_u, grid_v, original_h, original_w):
+    start_t = time.time()
+    
     frames, tile_h, w, c = tiled_volume.shape
     total_epis_padded = frames * TILES_PER_FRAME
     epi_raw = tiled_volume.reshape(total_epis_padded, grid_u, w, c)
@@ -88,9 +94,9 @@ def reconstruct_from_epi(tiled_volume, pad_frames, grid_u, grid_v, original_h, o
         epi_raw = epi_raw[:-pad_frames]
         
     lf_reconstructed = epi_raw.reshape(grid_v, original_h, grid_u, w, c).transpose(2, 0, 1, 3, 4)
-    return lf_reconstructed
+    return lf_reconstructed, time.time() - start_t
 
-def compress_epi_video(volume, output_path, codec, crf):
+def compress_epi_video(volume, output_path, codec, crf=None):
     frames, h, w, c = volume.shape
     
     # --- CALCOLO PADDING (Multipli di 8) ---
@@ -119,19 +125,19 @@ def compress_epi_video(volume, output_path, codec, crf):
     ]
     
     if codec == 'av1':
-        cmd.extend(['-c:v', 'libaom-av1', '-cpu-used', '4'])
+        cmd.extend(['-c:v', 'libaom-av1', '-cpu-used', '5', '-crf', ('11' if crf is None else str(crf))])
     elif codec == 'hevc':
-        cmd.extend(['-c:v', 'libx265', '-x265-params', 'log-level=error'])
+        cmd.extend(['-c:v', 'libx265', '-crf', ('14' if crf is None else str(crf))])
     elif codec == 'vp9':
-        cmd.extend(['-c:v', 'libvpx-vp9', '-b:v', '0'])
+        cmd.extend(['-c:v', 'libvpx-vp9', '-b:v', '0', "-cpu-used", "3", '-crf', ('15' if crf is None else str(crf))])
     
     cmd.extend([
-        '-crf', str(crf),
         '-pix_fmt', 'yuv420p10le',
         str(output_path)
     ])
     
     print(f"[{codec.upper()}] Encoding...")
+    print(f"Command: {' '.join(cmd)}")
     start_t = time.time()
     
     # IMPORTANTE: Catturiamo stderr per debugging
@@ -211,7 +217,7 @@ def decompress_epi_video(video_path, shape_meta, pad_w, pad_h):
         
     return volume, time.time() - start_t
 
-def run_comparison(input_folder, grid_u, grid_v, crf):
+def run_comparison(input_folder, grid_u, grid_v, codec_crf):
     output_base = Path(input_folder).parent / "epi_comparison"
     if output_base.exists(): shutil.rmtree(output_base)
     output_base.mkdir(parents=True)
@@ -230,7 +236,7 @@ def run_comparison(input_folder, grid_u, grid_v, crf):
     original_size_mb = lf_data.nbytes / (1024**2)
     U, V, H, W, C = lf_data.shape
     
-    epi_vol, pad_frames = transform_to_epi_volume(lf_data)
+    epi_vol, pad_frames, t_transform = transform_to_epi_volume(lf_data)
     epi_shape = epi_vol.shape 
     
     codecs = ['hevc', 'av1', 'vp9']
@@ -247,7 +253,7 @@ def run_comparison(input_folder, grid_u, grid_v, crf):
         vid_path = comp_dir / f"epi_{codec}.{ext}"
         
         # A. Compressione
-        success, t_comp, pad_w, pad_h = compress_epi_video(epi_vol, vid_path, codec, crf)
+        success, t_comp, pad_w, pad_h = compress_epi_video(epi_vol, vid_path, codec, codec_crf[codec])
         if not success: continue
         
         size_mb = os.path.getsize(vid_path) / (1024**2)
@@ -258,7 +264,7 @@ def run_comparison(input_folder, grid_u, grid_v, crf):
         if rec_vol_epi is None: continue
         
         print("Ricostruzione Light Field 5D...")
-        lf_rec = reconstruct_from_epi(rec_vol_epi, pad_frames, grid_u, grid_v, H, W)
+        lf_rec, t_reconstruct = reconstruct_from_epi(rec_vol_epi, pad_frames, grid_u, grid_v, H, W)
         
         # D. Salvataggio Immagini
         out_folder_codec = decomp_dir / codec
@@ -289,8 +295,8 @@ def run_comparison(input_folder, grid_u, grid_v, crf):
         results[codec] = {
             'size_mb': size_mb,
             'ratio': ratio,
-            'time_comp': t_comp,
-            'time_dec': t_dec,
+            'time_comp': t_comp + t_transform,
+            'time_dec': t_dec + t_reconstruct,
             'savings': (1 - size_mb/original_size_mb)*100
         }
         
@@ -307,12 +313,50 @@ def run_comparison(input_folder, grid_u, grid_v, crf):
     print("=" * 60)
     print(f"Output salvati in: {output_base}")
 
+def get_grid_dimensions(folder_path):
+    """
+    Calcola le dimensioni della griglia (t, s) basate sul numero di file .ppm nella cartella.
+    Assumiamo che i file rappresentino una griglia completa.
+    """
+    
+    files = list(folder_path.glob("*.ppm"))
+    grid_dim = sqrt(len(files))
+    return int(grid_dim), int(grid_dim)
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("input", help="Cartella .ppm 16 bit")
-    parser.add_argument("u", type=int)
-    parser.add_argument("v", type=int)
-    parser.add_argument("--crf", type=int, default=15)
+    parser = argparse.ArgumentParser(
+        description="EPI Codec Video Processor - Complete workflow (compression and decompression) with dynamic parameters",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    
+    parser.add_argument("dataset_name", help="Name of the dataset folder (e.g., bikes, cars)")
+    parser.add_argument("--lenslet", action=argparse.BooleanOptionalAction, help="Whether the dataset is of the lenslet type", required=True)
+    parser.add_argument("--crf_hevc", type=int, help="CRF value for HEVC (default: 14)")
+    parser.add_argument("--crf_av1", type=int, help="CRF value for AV1 (default: 11)")
+    parser.add_argument("--crf_vp9", type=int, help="CRF value for VP9 (default: 15)")
+    
     args = parser.parse_args()
     
-    run_comparison(args.input, args.u, args.v, args.crf)
+    BASE_DATASETS_PATH = "./datasets"
+    
+    ppm_folder = Path(BASE_DATASETS_PATH) / args.dataset_name / "RAW" / ("PPM" if not args.lenslet else "PPM_shifted")
+    
+    if not ppm_folder.exists():
+        print(f"Folder not found: {ppm_folder}")
+        sys.exit(1)
+    
+    # Initialize codec CRF values
+    codec_crf = {
+        'hevc': args.crf_hevc,
+        'av1': args.crf_av1,
+        'vp9': args.crf_vp9
+    }
+    
+    # Auto-detect grid dimensions
+    grid_t, grid_s = get_grid_dimensions(ppm_folder)
+    if grid_t <= 0 or grid_s <= 0:
+        print("ERROR: Could not determine grid dimensions from PPM files.")
+        sys.exit(1)
+    else:
+        print(f"Detected grid dimensions: {grid_t}x{grid_s}")
+    
+    run_comparison(ppm_folder, grid_t, grid_s, codec_crf)

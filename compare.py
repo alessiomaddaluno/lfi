@@ -246,22 +246,52 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
-    parser.add_argument('-o', '--original', required=True, help='Cartella frame originali (.ppm)')
-    parser.add_argument('-d', '--decompressed', required=True, help='Cartella frame decompressi (.ppm)')
-    parser.add_argument('-c', '--compressed', dest='compressed_file', required=True, help='File compresso')
+    parser.add_argument("dataset_name", help="Name of the dataset folder (e.g., bikes, cars)")
+    parser.add_argument("--lenslet", action=argparse.BooleanOptionalAction, help="Whether the dataset is of the lenslet type", required=True)
+    parser.add_argument("-c", "--codec", help="Codec used for compression (jpl, av1, hevc, vp9, epi_hevc, epi_av1, epi_vp9)", required=True,
+                        choices=["jpl", "av1", "hevc", "vp9", "epi_hevc", "epi_av1", "epi_vp9"])
     
     args = parser.parse_args()
     
-    if not os.path.exists(args.original):
-        print(f"ERRORE: Cartella originale non trovata: {args.original}")
+    BASE_DATASETS_PATH = "./datasets"
+    dataset_base_path = Path(BASE_DATASETS_PATH) / args.dataset_name
+
+    # Original folder
+    original_folder = dataset_base_path / "RAW" / ("PPM" if not args.lenslet else "PPM_shifted")
+    if not os.path.exists(original_folder):
+        print(f"ERRORE: Cartella originale non trovata: {original_folder}")
         sys.exit(1)
-        
-    if not os.path.exists(args.decompressed):
-        print(f"ERRORE: Cartella decompressa non trovata: {args.decompressed}")
-        sys.exit(1)
-        
-    if not os.path.exists(args.compressed_file):
-        print(f"ERRORE: File compresso non trovato: {args.compressed_file}")
-        sys.exit(1)
+    else:
+        print(f"Original: {original_folder}")
     
-    comparison(args.original, args.decompressed, args.compressed_file)
+    # Decompressed folder
+    if args.codec == "jpl":
+        decompressed_folder = dataset_base_path / "decoded" / "PPM" / (args.dataset_name if not args.lenslet else f"{args.dataset_name}_shifted")
+    elif args.codec in ["av1", "hevc", "vp9"]:
+        decompressed_folder = dataset_base_path / "RAW" / "codec_comparison_timing" / "decompressed" / f"decompressed_{args.codec}"
+    else:  # epi_hevc, epi_av1, epi_vp9
+        decompressed_folder = dataset_base_path / "RAW" / "epi_comparison" / "decompressed" / args.codec.split('_')[1]
+
+    if not os.path.exists(decompressed_folder):
+        print(f"ERRORE: Cartella decompressa non trovata: {decompressed_folder}")
+        sys.exit(1)
+    else:
+        print(f"Decompressed: {decompressed_folder}")
+    
+    # Compressed file path
+    if args.codec == "jpl":
+        compressed_file = dataset_base_path / "encoded" / f"{args.dataset_name}.jpl"
+    elif args.codec in ["av1", "hevc", "vp9"]:
+        codec = args.codec
+        compressed_file = dataset_base_path / "RAW" / "codec_comparison_timing" / "compressed" / f"compressed_{codec}.{'mkv' if codec == 'av1' else 'mp4' if codec == 'hevc' else 'webm'}"
+    else:  # epi_hevc, epi_av1, epi_vp9
+        codec = args.codec.split('_')[1]
+        compressed_file = dataset_base_path / "RAW" / "epi_comparison" / "compressed" / f"epi_{codec}.{'mkv' if codec == 'av1' else 'mp4' if codec == 'hevc' else 'webm'}"
+
+    if not os.path.exists(compressed_file):
+        print(f"ERRORE: File compresso non trovato: {compressed_file}")
+        sys.exit(1)
+    else:
+        print(f"Compressed file: {compressed_file}")
+
+    comparison(original_folder, decompressed_folder, compressed_file)

@@ -10,13 +10,11 @@ def analyze_ppm_raw(filepath):
             byte = f.read(1)
             header += byte
             # Cerchiamo la fine dell'header (whitespace dopo il maxval)
-            # Un header PPM tipico finisce dopo il 3° numero (MaxVal) e un carattere whitespace
-            if header.count(b'\n') >= 3 and byte.isspace():
-                # Controllo grezzo per vedere se abbiamo finito l'header
-                # P6\nWidth Height\nMaxVal\n
-                parts = header.split()
-                if len(parts) >= 4: # Magic, W, H, MaxVal
-                    break
+            # Un header PPM tipico finisce dopo il 4° numero (MaxVal) e un carattere whitespace
+            parts = header.split()
+            if len(parts) >= 4 and byte.isspace():
+                # Magic, W, H, MaxVal
+                break
         
         # Pulizia header dai commenti
         header_str = header.decode('ascii', errors='ignore')

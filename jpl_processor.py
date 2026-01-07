@@ -3,10 +3,12 @@
 JPEG Pleno Processor - Complete workflow (Steps 1-6)
 Steps 1-3: Encoding (Preprocessing + PPM to PGX + Encoding)
 Steps 4-6: Decoding (Decoding + PGX to PPM + Postprocessing)
-Usage: python jpl_processor.py <dataset_name> <grid_t> <grid_s> [--steps STEPS] [--lambda LAMBDA]
+Usage: jpl_processor.py [-h] --lenslet | --no-lenslet [--steps STEPS] [--lambda LAMBDA_VALUE] dataset_name
 """
 
+from math import sqrt
 import os
+import shutil
 import subprocess
 import sys
 import argparse
@@ -103,14 +105,14 @@ class JPEGPlenoProcessor:
         
         return True, exec_time
 
-    def step2_convert_ppm_to_pgx(self, dataset_name):
+    def step2_convert_ppm_to_pgx(self, dataset_name, lenslet=True):
         """STEP 2: Convert shifted PPM to PGX"""
         print(f"\n{'='*50}")
         print(f"STEP 2: CONVERT PPM TO PGX - {dataset_name}")
         print(f"{'='*50}")
         
         dataset_base_path = self.base_datasets_path / dataset_name
-        raw_shifted_ppm_path = dataset_base_path / "RAW" / "PPM_shifted"
+        raw_shifted_ppm_path = dataset_base_path / "RAW" / "PPM_shifted" if lenslet else dataset_base_path / "RAW" / "PPM"
         raw_shifted_pgx_path = dataset_base_path / "RAW" / "PGX"
         
         raw_shifted_ppm_path_abs = raw_shifted_ppm_path.resolve()
@@ -196,7 +198,7 @@ class JPEGPlenoProcessor:
 
     def calculate_auto_lambda(self, width, height, grid_t, grid_s):
         """Calcola lambda automaticamente in base alla dimensione totale del light field"""
-        return 500
+        return 700
         #total_pixels = width * height * grid_t * grid_s
         #
         #if total_pixels > 100000000:
@@ -294,7 +296,7 @@ class JPEGPlenoProcessor:
             print(f"ERROR: Encoded file not created: {output_jpl_file}")
             return False, exec_time
 
-    def step4_jpl_decoding(self, dataset_name):
+    def step4_jpl_decoding(self, dataset_name, lenslet=True):
         """STEP 4: JPEG Pleno Decoding"""
         print(f"\n{'='*50}")
         print(f"STEP 4: JPEG PLENO DECODING - {dataset_name}")
@@ -304,7 +306,7 @@ class JPEGPlenoProcessor:
         
         input_jpl_file = dataset_base_path / "encoded" / f"{dataset_name}.jpl"
         decoded_path = dataset_base_path / "decoded"
-        decoded_pgx_shifted = decoded_path / "PGX" / f"{dataset_name}_shifted"
+        decoded_pgx_shifted = decoded_path / "PGX" / f"{dataset_name}_shifted" if lenslet else decoded_path / "PGX" / dataset_name
         
         input_jpl_file_abs = input_jpl_file.resolve()
         decoded_pgx_shifted_abs = decoded_pgx_shifted.resolve()
@@ -336,7 +338,7 @@ class JPEGPlenoProcessor:
         
         return True, exec_time
 
-    def step5_convert_pgx_to_ppm(self, dataset_name):
+    def step5_convert_pgx_to_ppm(self, dataset_name, lenslet=True):
         """STEP 5: Convert decoded PGX to PPM"""
         print(f"\n{'='*50}")
         print(f"STEP 5: CONVERT PGX TO PPM - {dataset_name}")
@@ -344,8 +346,8 @@ class JPEGPlenoProcessor:
         
         dataset_base_path = self.base_datasets_path / dataset_name
         
-        decoded_pgx_shifted = dataset_base_path / "decoded" / "PGX" / f"{dataset_name}_shifted"
-        decoded_ppm_shifted = dataset_base_path / "decoded" / "PPM" / f"{dataset_name}_shifted"
+        decoded_pgx_shifted = dataset_base_path / "decoded" / "PGX" / f"{dataset_name}_shifted" if lenslet else dataset_base_path / "decoded" / "PGX" / dataset_name
+        decoded_ppm_shifted = dataset_base_path / "decoded" / "PPM" / f"{dataset_name}_shifted" if lenslet else dataset_base_path / "decoded" / "PPM" / dataset_name
         
         decoded_pgx_shifted_abs = decoded_pgx_shifted.resolve()
         decoded_ppm_shifted_abs = decoded_ppm_shifted.resolve()
@@ -445,7 +447,7 @@ class JPEGPlenoProcessor:
         
         return True, exec_time
 
-    def process_dataset(self, dataset_name, grid_t, grid_s, width, height, steps=None, lambda_value=None):
+    def process_dataset(self, dataset_name, grid_t, grid_s, width, height, steps=None, lambda_value=None, lenslet=True):
         """Processa tutto il workflow Step 1-6 con timing"""
         if steps is None:
             steps = [1, 2, 3, 4, 5, 6]
@@ -463,7 +465,7 @@ class JPEGPlenoProcessor:
         total_start_time = time.time()
         
         # ENCODING PIPELINE
-        if 1 in steps:
+        if 1 in steps and lenslet:
             success, time_step1 = self.step1_lenslet_preprocessing(dataset_name, grid_t, grid_s)
             step_times[1] = time_step1
             if not success:
@@ -471,7 +473,7 @@ class JPEGPlenoProcessor:
                 return False, step_times
         
         if 2 in steps:
-            success, time_step2 = self.step2_convert_ppm_to_pgx(dataset_name)
+            success, time_step2 = self.step2_convert_ppm_to_pgx(dataset_name, lenslet)
             step_times[2] = time_step2
             if not success:
                 print(f"STEP 2 FAILED - stopping")
@@ -486,20 +488,20 @@ class JPEGPlenoProcessor:
         
         # DECODING PIPELINE
         if 4 in steps:
-            success, time_step4 = self.step4_jpl_decoding(dataset_name)
+            success, time_step4 = self.step4_jpl_decoding(dataset_name, lenslet)
             step_times[4] = time_step4
             if not success:
                 print(f"STEP 4 FAILED - stopping")
                 return False, step_times
         
         if 5 in steps:
-            success, time_step5 = self.step5_convert_pgx_to_ppm(dataset_name)
+            success, time_step5 = self.step5_convert_pgx_to_ppm(dataset_name, lenslet)
             step_times[5] = time_step5
             if not success:
                 print(f"STEP 5 FAILED - stopping")
                 return False, step_times
         
-        if 6 in steps:
+        if 6 in steps and lenslet:
             success, time_step6 = self.step6_lenslet_postprocessing(dataset_name)
             step_times[6] = time_step6
             if not success:
@@ -546,6 +548,16 @@ def get_ppm_dimensions(folder_path):
     except Exception as e:
         print(f"Errore nella lettura del file {files[0]}: {e}")
         return None
+    
+def get_grid_dimensions(folder_path):
+    """
+    Calcola le dimensioni della griglia (t, s) basate sul numero di file .ppm nella cartella.
+    Assumiamo che i file rappresentino una griglia completa.
+    """
+    
+    files = list(folder_path.glob("*.ppm"))
+    grid_dim = sqrt(len(files))
+    return int(grid_dim), int(grid_dim)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -554,13 +566,13 @@ def main():
         epilog="""
 Examples:
   # Complete workflow with auto parameters
-  python jpl_processor.py bikes 13 13
+  python jpl_processor.py Bikes --lenslet
 
   # Custom lambda value (higher = more compression, lower = higher quality)
-  python jpl_processor.py bikes 13 13 --lambda 1000
+  python jpl_processor.py Bikes --lenslet --lambda 1000
 
   # Only encoding steps with custom lambda
-  python jpl_processor.py bikes 13 13 --steps 1,2,3 --lambda 20000
+  python jpl_processor.py Bikes --lenslet --steps 1,2,3 --lambda 20000
 
 Lambda values guide:
   - 1000-5000:    Low compression, excellent quality
@@ -571,8 +583,9 @@ Lambda values guide:
     )
     
     parser.add_argument("dataset_name", help="Name of the dataset folder (e.g., bikes, cars)")
-    parser.add_argument("grid_t", type=int, help="Number of horizontal views (t)")
-    parser.add_argument("grid_s", type=int, help="Number of vertical views (s)") 
+    #parser.add_argument("grid_t", type=int, help="Number of horizontal views (t)")
+    #parser.add_argument("grid_s", type=int, help="Number of vertical views (s)") 
+    parser.add_argument("--lenslet", action=argparse.BooleanOptionalAction, help="Whether the dataset is of the lenslet type", required=True)
     #parser.add_argument("width", type=int, help="Image width in pixels")
     #parser.add_argument("height", type=int, help="Image height in pixels")
     parser.add_argument("--steps", help="Comma-separated steps to execute (1-6), e.g., '1,2,3' or '4,5,6'")
@@ -583,6 +596,16 @@ Lambda values guide:
     # Configurazione paths
     JPLM_BUILD_PATH = "/home/losor2002/jpeg-pleno-refsw/build"
     BASE_DATASETS_PATH = "./datasets"
+    
+    dataset_base_path = Path(BASE_DATASETS_PATH) / args.dataset_name
+    if not dataset_base_path.exists():
+        print(f"Folder not found: {dataset_base_path}")
+        sys.exit(1)
+    
+    jplm_build_path = Path(JPLM_BUILD_PATH)
+    if not jplm_build_path.exists():
+        print(f"JPLM build not found: {jplm_build_path}")
+        sys.exit(1)
     
     # Parse steps
     if args.steps:
@@ -596,7 +619,20 @@ Lambda values guide:
             sys.exit(1)
     else:
         steps = [1, 2, 3, 4, 5, 6]
+        
+    # Auto-detect grid dimensions
+    grid_t, grid_s = get_grid_dimensions(Path(BASE_DATASETS_PATH) / args.dataset_name / "RAW" / "PPM")
+    if grid_t <= 0 or grid_s <= 0:
+        print("ERROR: Could not determine grid dimensions from PPM files.")
+        sys.exit(1)
+    else:
+        print(f"Detected grid dimensions: {grid_t}x{grid_s}")
+        if args.lenslet:
+            grid_t -= 2
+            grid_s -= 2
+            print(f"Adjusted grid dimensions for lenslet: {grid_t}x{grid_s}")
     
+    # Auto-detect image dimensions
     width, height = get_ppm_dimensions(Path(BASE_DATASETS_PATH) / args.dataset_name / "RAW" / "PPM")
     if width is None or height is None:
         print("ERROR: Could not determine image dimensions from PPM files.")
@@ -604,17 +640,43 @@ Lambda values guide:
     else:
         print(f"Detected image dimensions: {width}x{height}")
     
+    # Delete old folders if they exist
+    raw_shifted_ppm_path = dataset_base_path / "RAW" / "PPM_shifted"
+    if args.lenslet and 1 in steps and raw_shifted_ppm_path.exists():
+        shutil.rmtree(raw_shifted_ppm_path)
+    
+    raw_shifted_pgx_path = dataset_base_path / "RAW" / "PGX"
+    if 2 in steps and raw_shifted_pgx_path.exists():
+        shutil.rmtree(raw_shifted_pgx_path)
+    
+    encoded_path = dataset_base_path / "encoded" / f"{args.dataset_name}.jpl"
+    if 3 in steps and encoded_path.exists():
+        encoded_path.unlink()
+        
+    decoded_pgx_path = dataset_base_path / "decoded" / "PGX"
+    if 4 in steps and decoded_pgx_path.exists():
+        shutil.rmtree(decoded_pgx_path)
+        
+    decoded_shifted_ppm_path = dataset_base_path / "decoded" / "PPM" / (f"{args.dataset_name}_shifted" if args.lenslet else args.dataset_name)
+    if 5 in steps and decoded_shifted_ppm_path.exists():
+        shutil.rmtree(decoded_shifted_ppm_path)
+        
+    decoded_ppm_path = dataset_base_path / "decoded" / "PPM" / args.dataset_name
+    if args.lenslet and 6 in steps and decoded_ppm_path.exists():
+        shutil.rmtree(decoded_ppm_path)
+    
     try:
         processor = JPEGPlenoProcessor(JPLM_BUILD_PATH, BASE_DATASETS_PATH)
         
         success, step_times = processor.process_dataset(
             args.dataset_name,
-            args.grid_t,
-            args.grid_s, 
+            grid_t,
+            grid_s, 
             width,
             height,
             steps=steps,
-            lambda_value=args.lambda_value
+            lambda_value=args.lambda_value,
+            lenslet=args.lenslet
         )
         
         if not success:

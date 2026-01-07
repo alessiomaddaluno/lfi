@@ -4,6 +4,7 @@ Video Codec Comparison for Light Field Compression WITH PADDING AND TIMING
 Compares HEVC, AV1, and VP9 with proper padding and timing metrics
 """
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -41,21 +42,23 @@ def get_ppm_dimensions(ppm_folder):
     
     # Leggi l'header del primo file PPM
     with open(ppm_files[0], 'rb') as f:
+        header = list()
+        for line in f:
+            if line[0] != ord('#'):  # Non è un commento
+                for word in line.split():
+                    header.append(word)
+            if len(header) >= 3:
+                break
+        
         # Leggi magic number
-        magic = f.readline().strip()
+        magic = header[0]
         if magic != b'P6':
             print(f"Formato PPM non supportato: {magic}")
             return None
         
-        # Salta commenti e leggi dimensioni
-        while True:
-            line = f.readline()
-            if line[0] != ord('#'):  # Non è un commento
-                try:
-                    width, height = map(int, line.split())
-                    return width, height
-                except ValueError:
-                    continue
+        width = int(header[1])
+        height = int(header[2])
+        return width, height
 
 def get_hevc_compatible_dimensions(width, height):
     """Calcola dimensioni multiple di 8 (necessarie per HEVC)"""
@@ -63,7 +66,7 @@ def get_hevc_compatible_dimensions(width, height):
     new_height = ((height + 7) // 8) * 8
     return new_width, new_height
 
-def compress_with_codec(ppm_folder, output_dir, codec, crf=3):
+def compress_with_codec(ppm_folder, output_dir, codec, crf=None):
     """
     Comprime le viste PPM usando FFmpeg.
     Applica il padding ON-THE-FLY usando il filtro 'pad' di FFmpeg se necessario (HEVC).
@@ -82,19 +85,22 @@ def compress_with_codec(ppm_folder, output_dir, codec, crf=3):
             'name': 'HEVC',
             'codec': 'libx265',
             'extension': 'mp4',
-            'requires_padding': True
+            'requires_padding': True,
+            'crf': 14
         },
         'av1': {
             'name': 'AV1', 
             'codec': 'libaom-av1',
             'extension': 'mkv',
-            'requires_padding': False
+            'requires_padding': True,
+            'crf': 22
         },
         'vp9': {
             'name': 'VP9',
             'codec': 'libvpx-vp9', 
             'extension': 'webm',
-            'requires_padding': False
+            'requires_padding': True,
+            'crf': 22
         }
     }
     
@@ -102,6 +108,9 @@ def compress_with_codec(ppm_folder, output_dir, codec, crf=3):
         return None, None, 0
     
     info = codec_info[codec]
+    if crf is not None:
+        info['crf'] = crf
+    
     output_file = output_dir / f"compressed_{codec}.{info['extension']}"
     
     # 2. Calcolo del Padding (senza creare file fisici)
@@ -136,15 +145,15 @@ def compress_with_codec(ppm_folder, output_dir, codec, crf=3):
     
     cmd.extend([
         "-c:v", info['codec'],
-        "-crf", str(crf),
+        "-crf", str(info['crf']),
         "-pix_fmt", "yuv420p10le"
     ])
     
     # Parametri specifici per codec
     if codec == 'av1':
-        cmd.extend(["-cpu-used", "4"])
+        cmd.extend(["-cpu-used", "5"])
     elif codec == 'vp9':
-        cmd.extend(["-b:v", "0"])
+        cmd.extend(["-b:v", "0", "-cpu-used", "3"])
     
     cmd.append(str(output_file))
     
@@ -296,24 +305,44 @@ def format_time(seconds):
         return f"{seconds/3600:.1f}h"
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python compare_codecs_timing.py <ppm_folder>")
-        print("  ppm_folder: Folder with PPM files")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Codec Video Processor - Complete workflow (compression and decompression) with dynamic parameters",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     
-    ppm_folder = Path(sys.argv[1])
+    parser.add_argument("dataset_name", help="Name of the dataset folder (e.g., bikes, cars)")
+    parser.add_argument("--lenslet", action=argparse.BooleanOptionalAction, help="Whether the dataset is of the lenslet type", required=True)
+    parser.add_argument("--crf_hevc", type=int, help="CRF value for HEVC (default: 14)")
+    parser.add_argument("--crf_av1", type=int, help="CRF value for AV1 (default: 22)")
+    parser.add_argument("--crf_vp9", type=int, help="CRF value for VP9 (default: 22)")
+    
+    args = parser.parse_args()
+    
+    BASE_DATASETS_PATH = "./datasets"
+    
+    ppm_folder = Path(BASE_DATASETS_PATH) / args.dataset_name / "RAW" / ("PPM" if not args.lenslet else "PPM_shifted")
     
     if not ppm_folder.exists():
         print(f"Folder not found: {ppm_folder}")
         sys.exit(1)
     
+    # Initialize codec CRF values
+    codec_crf = {
+        'hevc': args.crf_hevc,
+        'av1': args.crf_av1,
+        'vp9': args.crf_vp9
+    }
+
     # Verifica dimensioni originali
     original_dimensions = get_ppm_dimensions(ppm_folder)
     if original_dimensions:
         print(f"Dimensioni originali: {original_dimensions[0]}x{original_dimensions[1]}")
     
-    # Create directory structure
+    # Delete old output folders if they exist
     base_output = ppm_folder.parent / "codec_comparison_timing"
+    if base_output.exists():
+        shutil.rmtree(base_output)
+    
+    # Create directory structure
     compressed_dir = base_output / "compressed"
     decompressed_dir = base_output / "decompressed"
     
@@ -338,7 +367,7 @@ def main():
     for codec in codecs:
         print(f"\n--- {codec.upper()} ---")
         compressed_file, padding_info, compression_time = compress_with_codec(
-            ppm_folder, compressed_dir, codec, crf=3
+            ppm_folder, compressed_dir, codec, codec_crf[codec]
         )
         
         if compressed_file:
