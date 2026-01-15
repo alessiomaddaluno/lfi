@@ -576,9 +576,9 @@ Examples:
 
 Lambda values guide:
   - 1000-5000:    Low compression, excellent quality
-  - 5000-20000:   Medium compression, medium quality (default auto)
+  - 5000-20000:   Medium compression, medium quality
   - 20000-50000:  High compression, low quality
-  - auto:         Default value 500
+  - auto:         Default value 700
         """
     )
     
