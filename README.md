@@ -1,4 +1,4 @@
-# Light Field Images Compression
+# Light Field Image Compression
 
 This repository contains the project developed for the *Data Compression* exam.
 The goal is to evaluate the performance of different codecs for **compressing Light Field Images (LFI)** through benchmarks on different datasets and a written report.
