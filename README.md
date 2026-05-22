@@ -25,6 +25,7 @@ To ensure consistency in compression and decompression times, all tests were per
 ├── epi_codec_video.py                 # Video codec compressor and decompressor which uses EPI images (HEVC, AV1, VP9)
 ├── jpl_processor.py                   # JPEG Pleno compressor and decompressor
 ├── raw_check.py                       # Header Check for PPM files
+├── lfi_compression_presentation.pdf   # Project presentation
 ├── light_field_image_compression.pdf  # Final report
 └── results.xlsx                       # Excel document with benchmarks results
 ```
